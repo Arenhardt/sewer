@@ -158,8 +158,8 @@ class Client(object):
                 self.account_key = account_key
                 self.PRIOR_REGISTERED = True
 
-            self.logger.info("intialise_success, sewer_version={0}, domain_names={1}, acme_server={2}".format(
-                sewer_version.__version__, self.all_domain_names, self.ACME_DIRECTORY_URL[:20] + '...'))
+            self.logger.info("intialise_success, sewer_version={0}, domain_names={1}, acme_server={2}. user_agent={3}".format(
+                sewer_version.__version__, self.all_domain_names, self.ACME_DIRECTORY_URL[:20] + '...', self.User_Agent))
         except Exception as e:
             self.logger.error(
                 'Unable to intialise client. error={0}'.format(
@@ -466,7 +466,7 @@ class Client(object):
         self.logger.info('check_authorization_status_success')
         return check_authorization_status_response
 
-    def respond_to_challenge(self, acme_keyauthorization, dns_challenge_url):
+    def respond_to_challenge(self, acme_keyauthorization, dns_challenge_url, domain_name):
         """
         https://tools.ietf.org/html/draft-ietf-acme-acme#section-7.5.1
         To prove control of the identifier and receive authorization, the
@@ -481,16 +481,17 @@ class Client(object):
         request to the authorization URL, and the server responds with the
         current authorization object.
         """
-        self.logger.info('respond_to_challenge')
+        # self.logger.info('respond_to_challenge')
         payload = {"keyAuthorization": "{0}".format(acme_keyauthorization)}
+        self.logger.info('respond_to_challenge_request. payload={0}. dns_challenge_url={1}. domain_name={2}'.format(payload, dns_challenge_url, domain_name))
         respond_to_challenge_response = self.make_signed_acme_request(
-            dns_challenge_url, payload)
+            dns_challenge_url, payload, request_type='respond_to_challenge')
         self.logger.debug(
             'respond_to_challenge_response. status_code={0}. response={1}'.format(
                 respond_to_challenge_response.status_code,
                 self.log_response(respond_to_challenge_response)))
 
-        self.logger.info('respond_to_challenge_success')
+        self.logger.info('respond_to_challenge_response')
         return respond_to_challenge_response
 
     def send_csr(self, finalize_url):
@@ -631,7 +632,7 @@ class Client(object):
             header["kid"] = self.kid
         return header
 
-    def make_signed_acme_request(self, url, payload):
+    def make_signed_acme_request(self, url, payload, request_type=None):
         self.logger.debug('make_signed_acme_request')
         headers = {'User-Agent': self.User_Agent}
         payload = self.stringfy_items(payload)
@@ -651,6 +652,9 @@ class Client(object):
                 {"protected": protected64, "payload": payload64,
                  "signature": signature64})
             headers.update({"Content-Type": "application/jose+json"})
+
+            if request_type=='respond_to_challenge':
+                self.logger.debug('request_to_acme. url={0}. request_body={1}. request_headers={2}'.format(url, data, headers) )
             response = requests.post(
                 url,
                 data=data.encode('utf8'),
@@ -676,16 +680,16 @@ class Client(object):
                 self.dns_class.create_dns_record(dns_name, domain_dns_value)
                 self.check_authorization_status(authorization_url)
                 self.respond_to_challenge(
-                    acme_keyauthorization, dns_challenge_url)
+                    acme_keyauthorization, dns_challenge_url, dns_name)
             certificate_url = self.send_csr(finalize_url)
             certificate = self.download_certificate(certificate_url)
         except Exception as e:
             self.logger.error(
                 'Error: Unable to issue certificate. error={0}'.format(str(e)))
             raise e
-        finally:
-            for dns_name in dns_names_to_delete:
-                self.dns_class.delete_dns_record(dns_name, domain_dns_value)
+        # finally:
+        #     for dns_name in dns_names_to_delete:
+        #         self.dns_class.delete_dns_record(dns_name, domain_dns_value)
 
         return certificate
 
